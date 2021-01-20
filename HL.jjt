@@ -1,0 +1,454 @@
+// HL.jjt Copyright Sophie Quigley 2020
+// This file can be only used during the Fall 2020 academic semester 
+// in assignments for the course CPS710 at Ryerson University.
+// Other uses and distributions are prohibited.  
+// In particular this file or any others derived from it 
+// may not be posted in any source code repositories.
+
+options {
+  IGNORE_CASE=true;
+  DEBUG_PARSER=false;
+  MULTI=true;	// This will generate one AST class for each non-suppressed non-terminal
+  JJTREE_OUTPUT_DIRECTORY="AST";  // This will put all your AST classes in the AST directory
+  // This won't be used until the next assignment, but is needed to make your assignment compile properly:
+  VISITOR=true;
+  VISITOR_EXCEPTION="Exception";	
+}
+
+PARSER_BEGIN(HL)
+
+public class HL {
+}
+
+PARSER_END(HL)
+
+// ===========================================================================
+//                                 S C A N N E R   
+// ===========================================================================
+
+TOKEN_MGR_DECLS : 
+{
+public static int commentdepth = 0;
+}
+
+SKIP : {
+  " "     
+  | "\t"    
+  | "\n"    
+  | "\r"    
+  }
+
+TOKEN : 
+{
+  < AND:  "&">
+|	< ASSIGN:	"=">
+|	< COMMA:	",">
+|	< DIV:	"/">
+|	< EQUAL:	"==">
+|	< GREATEQ:	">=">
+|	< GREATER:	">">
+| < ISIN:   "=in">
+|	< LESSEQ:	"<=">
+|	< LESS:	"<">
+|	< LCURLY:	"{">
+|	< LPAREN:	"(">
+| < MOD: "%">
+|	< MINUS:	"-">
+| < NOTCOMP: "<>">
+|	< NOTEQ:	"!=">
+| < NOTIN: "!in">
+|	< NOT:"!">
+|	< OR:"|">
+| < PLUS:	"+">
+|	< PROD:	"*">
+|	< RCURLY:	"}">
+|	< RPAREN:	")">
+|	< SEMICOL:	";">
+}
+
+TOKEN : 
+{
+	< DO:"DO">
+|	< ELIF:"ELIF">
+|	< ELSE:"ELSE">
+|	< END:"END">
+| < FALSE:"FALSE">
+|	< FI:"FI">
+|	< FOR:"FOR">
+| < FROM:"FROM">
+|	< FUNCTION:"FUNCTION">
+|	< IF:"IF">
+| < IN:"IN">
+| < ISA:"ISA">
+| < NULL:"NULL">
+|	< NUM:"NUM">
+| < OBJ:"OBJ">
+|	< OD:"OD">
+| < PREDICATE:"PREDICATE">
+|	< PRINT:"PRINT">
+|	< PRINTLN:"PRINTLN">
+|	< RETURN:"RETURN">
+| < SET: "SET">
+| < SUB: "SUB">
+|	< STR:"STR">
+|	< THEN:"THEN">
+| < TO:"TO">
+| < TRUE:"TRUE">
+|	< WHILE:"WHILE">
+}
+
+TOKEN : 
+{
+	< #DIGIT:	["0"-"9"]>
+|	< #LETTER:	["a"-"z","A"-"Z"]>
+|	< NUMBER:	(<DIGIT>)+ >
+|	< IDENTIFIER:	<LETTER>(<LETTER>|<DIGIT>)* >
+}
+
+// ---------------------- PROCESSING STRING TOKEN ----------------------------
+
+MORE:
+{   <"\"" >    : INSTRING
+}
+<INSTRING> MORE:
+{   < "\\\\" >
+|   < "\\\"" >
+|   < "\\t" >
+|   < "\\n" >
+}
+<INSTRING> TOKEN:
+{   <STRING: "\""> : DEFAULT
+}
+<INSTRING> MORE:
+{
+    < ["0"-"9"] >
+|   < ["a"-"z","A"-"Z"] >
+|   < ["`", "~", "!", "@", "#", "$", "%", "^", "&", "*", "(", ")", "-", "_", "=", "+"] >
+|   < ["[", "{", "]", "}", "|"] >
+|   < [";", ":", "'"] >
+|   < ["," , "<" , "." , ">" , "/" , "?", " "] >
+}
+
+// ---------------------- PROCESSING COMMENTS     ----------------------------
+
+SPECIAL_TOKEN : {
+        <COMMENT_SINGLE: "//" (~["\n","\r"])* ("\n"|"\r"|"\r\n")>
+    }
+
+MORE:
+{   < "/*" >    : INCOMMENT0
+}
+
+<INCOMMENT0> SPECIAL_TOKEN:
+{
+    < COMMENT_MULTI: "*/" > :   DEFAULT
+}
+
+<INCOMMENT0> MORE:
+{
+    < "/*" > {commentdepth++;}  : INCOMMENT1
+|   < ~[] >
+}
+
+<INCOMMENT1> MORE:
+{
+    < "/*" > {commentdepth++;}
+|   < "*/" > {commentdepth--; if (commentdepth==0) SwitchTo(INCOMMENT0); }
+|   <~[]>
+}
+
+
+
+// ===========================================================================
+//                                 P A R S E R   
+// ===========================================================================
+
+// ------------------------------- BEGINNING -----------------------------------
+
+SimpleNode start	()  #void :
+{}
+{  S()  { return (SimpleNode) (jjtree.popNode()); }
+| < EOF > {throw ParseAbortException.EOF;}
+}
+
+void S() #void :
+{}
+{	statement_ll() ";"
+| LOOKAHEAD(2) assignment() ";"
+| expression() ";"
+}
+
+// ------------------------------- STATEMENTS -----------------------------------
+void statement() #void :
+{}
+{	statement_ll() ";" 
+| LOOKAHEAD(2) assignment() ";"
+| fn_call() ";"
+}
+
+void statement_ll()	#void :
+{}
+{	declaration() 
+| if_stat() 
+| for_stat() 
+| while_stat()	
+| print_stat() 
+| println_stat()
+| return_stat()
+}
+void body()		 :
+{}
+{	(statement())*
+}
+
+
+void clause()		 :
+{}
+{	(statement())+
+}
+
+// ------------------------------- DECLARATIONS ------------------------------
+
+void declaration() #void :
+{}
+{	LOOKAHEAD(2) simple_decl() 
+| fn_decl() 
+| sub_decl() 
+| predicate_decl()
+}
+
+void simple_decl()	 :
+{}
+{	type() ident_list()
+}
+
+void ident_list()	 :
+{}
+{	identifier() ("," identifier())*
+}
+
+void fn_decl()		 :
+{}
+{	type() <FUNCTION> identifier() "(" param_decls() ")" body() <END>
+}
+
+void sub_decl()	 :
+{}
+{	<SUB> identifier()  "(" param_decls() ")" body() <END>
+}
+
+void predicate_decl()	 :
+{}
+{	<PREDICATE>  identifier()  "(" param_decls() ")" body() <END>
+}
+
+void type() #void :
+{}
+{	<NUM>  #NUMTYPE 
+| <STR>  #STRTYPE 
+| <SET>  #SETTYPE 
+| <OBJ>  #OBJTYPE
+}
+
+void param_decls()	 :
+{}
+{	param_decl() ("," param_decl())*
+| {}
+}
+
+void param_decl()	 :
+{}
+{	type() identifier()
+}
+
+// ------------------------------- ASSIGNMENT, IF, LOOPS ------------------------------
+
+void assignment() :
+{}
+{     identifier() <ASSIGN> expression()
+}
+
+void if_stat() :
+{}
+{	<IF> condition() <THEN> clause() else_clause() <FI>
+}
+
+void else_clause	() #void:
+{}
+{	 (<ELIF> condition() <THEN> clause() else_clause()) #if_stat
+|  <ELSE> clause()
+|  {} #NOTHING
+}
+
+void for_stat() #void :
+{}
+{	LOOKAHEAD(3) for_explicit() 
+| for_implicit()
+}
+
+void for_explicit()	 :
+{}
+{	<FOR> identifier() <FROM> expression() <TO> expression() <DO> body() <OD>
+}
+
+void for_implicit()	 :
+{}
+{	<FOR> identifier() <IN> expression() <DO> body() <OD>
+}
+
+void while_stat()	 :
+{}
+{	<WHILE> condition() <DO> body() <OD>
+}
+
+// ------------------------------- FN CALLS, RETURN, PRINT -----------------------------
+
+void fn_call()		 :
+{}
+{	identifier() "(" optional_parameters() ")"
+}
+
+void return_stat()	:
+{}
+{	<RETURN> optional_return_value()
+}
+
+void optional_return_value() #void :
+{}
+{ <TRUE>         #TRUE
+| <FALSE>        #FALSE
+| expression()
+| {}             #NOTHING
+}
+
+void print_stat() #void:
+{}
+{ <PRINT> parameters()  #print
+}
+
+void println_stat() #void :
+{}
+{ <PRINTLN> optional_parameters() #println
+}
+
+void optional_parameters()  #void :
+{}
+{ parameters()
+| {}            #parameters
+}
+
+void parameters()	 :
+{}
+{	expression() ("," expression())*
+}
+
+// ------------------------------- CONDITIONS -----------------------------
+
+void condition() #void	 :
+{}
+{	(and_clause() (<OR> and_clause())*) #or(>1)
+}
+
+void and_clause()	#void :
+{}
+{	(not_clause() (<AND> not_clause())*) #and(>1)
+}
+
+void not_clause()	#void :
+{}
+{	<NOT> not_clause() #not
+| LOOKAHEAD(term() <ISA>) isatype() 
+| LOOKAHEAD(expression() comparator()) comparison()
+| "(" condition() ")" 
+| fn_call() 
+}
+
+void comparison()	 :
+{}
+{	expression() comparator() expression()
+}
+
+
+void comparator()	#void :
+{}
+{	<LESS>     #LESS  
+| <LESSEQ>   #LESSEQ 
+| <GREATER>  #GREATER 
+| <GREATEQ>  #GREATEQ 
+| <NOTCOMP>  #NOTCOMP 
+| <EQUAL>    #EQUAL 
+| <NOTEQ>    #NOTEQ 
+| <ISIN>     #ISIN 
+| <NOTIN>    #NOTIN
+}
+
+void isatype()		 :
+{}
+{	term() <ISA> type()
+}
+
+// ------------------------------- EXPRESSIONS -----------------------------
+
+void expression()	#void :
+{}
+{	product() more_products()
+| (<MINUS> product()) #negate more_products()
+}
+
+void more_products() #void  :
+{}
+{ (<PLUS> product()) #sum(2) more_products()
+| (<MINUS> product()) #difference(2) more_products()
+|{}
+}
+
+void product()	#void :
+{}
+{	term() more_terms()
+}
+
+void more_terms() #void  :
+{}
+{ (<PROD> term()) #product(2) more_terms()
+| (<DIV> term()) #quotient(2) more_terms()
+| (<MOD> term()) #remainder(2) more_terms()
+|{}
+}
+
+void term()	#void	 :
+{}
+{	"(" expression() ")" 
+| LOOKAHEAD(2) fn_call() 
+| identifier()
+| set_const()
+| number()
+| string() 
+| <NULL>    #NULL
+}
+
+void set_const() #void	 :
+{}
+{	"{" set_elements() "}"
+}
+
+void set_elements() #void	 :
+{}
+{	(expression() ("," expression())*)  #set
+| {}                                  #set
+}
+
+void identifier () :
+{Token t;}
+{  t=<IDENTIFIER>  {jjtThis.jjtSetValue(t.getValue());}
+}
+
+void number () :
+{Token t;}
+{  t=<NUMBER>  {jjtThis.jjtSetValue(t.getValue());}
+}
+
+void string () :
+{Token t;}
+{  t=<STRING>  {jjtThis.jjtSetValue(t.getValue());}
+}
+
